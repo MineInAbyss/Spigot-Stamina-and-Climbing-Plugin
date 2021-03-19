@@ -23,9 +23,14 @@ import java.util.*
 import kotlin.math.pow
 
 object StaminaBar : Listener {
+
     var disabledPlayers: MutableList<UUID> = mutableListOf() //TODO persist
     var registeredBars: MutableMap<UUID, BossBar> = mutableMapOf()
-    private var velocities: MutableMap<UUID, Double> = mutableMapOf()
+    var velocities: MutableMap<UUID, Double> = mutableMapOf()
+    private var ySpeeds: MutableMap<UUID, Double> = mutableMapOf()
+
+    private var previousTickTime: Long = 0
+    private val targetDeltaTime: Double = 1.0 / 20.0 //20 ticks per second
 
     fun registerBar(player: Player): BossBar {
         val uuid = player.uniqueId
@@ -58,27 +63,25 @@ object StaminaBar : Listener {
         if (!player.climbEnabled) return  //Only run if player has system turned on
         val vel = player.velocity.y
         if (vel < -0.1) {
-            velocities[uuid] = vel
+            ySpeeds[uuid] = vel
         }
+
         val loc = e.from
         val to = e.to ?: return
-
-        //if player is climbing and has moved
-        if (uuid.isClimbing && loc.distanceSquared(to) > 0.007)
-            uuid.removeProgress(StaminaConfig.data.staminaRemoveWhileMoving)
+        velocities[uuid] = loc.distanceSquared(to)
     }
 
     @EventHandler
     fun onPlayerFall(e: EntityDamageEvent) { //Remove stamina from player falls
         val player = e.entity as? Player ?: return
         val uuid = player.uniqueId
-        if (e.cause != EntityDamageEvent.DamageCause.FALL || !player.climbEnabled || !velocities.containsKey(uuid)) return
+        if (e.cause != EntityDamageEvent.DamageCause.FALL || !player.climbEnabled || !ySpeeds.containsKey(uuid)) return
 
         val bossBar = registeredBars[uuid] ?: return
         val threshold = 0.6 //TODO make config and not dumb calculations
         val multiplier = 11.0
         val exponent = 1.1
-        val vel = velocities[uuid] ?: return //TODO put this damage system into bonehurtingjuice
+        val vel = ySpeeds[uuid] ?: return //TODO put this damage system into bonehurtingjuice
         bossBar.isVisible = true
         if (vel > -threshold) {
             bossBar.removeProgress(0.1 / 15)
@@ -121,5 +124,31 @@ object StaminaBar : Listener {
     /** Removes [amount] progress from [uuid]'s associated BossBar's progress */
     internal fun removeProgress(amount: Double, uuid: UUID) {
         removeProgress(amount, registeredBars[uuid] ?: return)
+    }
+
+    /** Removes [amount] progress from [uuid]'s associated BossBar's progress, accounting for deltatime */
+    public fun removeProgressWithDeltaTime(amount: Double, uuid: UUID) {
+        val deltaTime = (System.currentTimeMillis() - previousTickTime) / 1000.0;
+        val timeMultiplier = if(previousTickTime != 0L) deltaTime / targetDeltaTime else 1.0;
+        previousTickTime = System.currentTimeMillis();
+        removeProgress(amount * timeMultiplier, uuid)
+    }
+
+    /** Adds [amount] progress to [bossBar]'s progress */
+    internal fun addProgress(amount: Double, bossBar: BossBar) {
+        bossBar.progress = (bossBar.progress + amount).coerceIn(0.0..1.0)
+    }
+
+    /** Adds [amount] progress to [uuid]'s associated BossBar's progress */
+    internal fun addProgress(amount: Double, uuid: UUID) {
+        addProgress(amount, registeredBars[uuid] ?: return)
+    }
+
+    /** Ads [amount] progress to [uuid]'s associated BossBar's progress, accounting for deltatime */
+    public fun addProgressWithDeltaTime(amount: Double, uuid: UUID) {
+        val deltaTime = (System.currentTimeMillis() - previousTickTime) / 1000.0;
+        val timeMultiplier = if(previousTickTime != 0L) deltaTime / targetDeltaTime else 1.0;
+        previousTickTime = System.currentTimeMillis();
+        addProgress(amount * timeMultiplier, uuid)
     }
 }
